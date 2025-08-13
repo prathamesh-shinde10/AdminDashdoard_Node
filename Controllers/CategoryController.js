@@ -8,15 +8,79 @@ const capitalizeFirstLetter = (string) => {
   return string.charAt(0).toUpperCase() + string.slice(1).toLowerCase();
 };
 
+// const addCategory = async (req, res) => {
+//   try {
+//     let { name } = req.body;
+//     name = capitalizeFirstLetter(name.trim());
+
+//     const existingCategory = await Category.findOne({
+//       name: { $regex: new RegExp(`^${name}$`, "i") },
+//     });
+
+//     if (existingCategory) {
+//       return res.status(400).json({ message: "Category already exists." });
+//     }
+
+//     if (!req.file) {
+//       return res.status(400).json({ message: "Please provide an image." });
+//     }
+
+//     const uploadResult = await cloudinary.uploader.upload_stream(
+//       {
+//         folder: "categories",
+//       },
+//       async (error, result) => {
+//         if (error) {
+//           return res.status(500).json({
+//             message: "Error uploading image to Cloudinary",
+//             error: error.message,
+//           });
+//         }
+
+//         const counter = await Counter.findOneAndUpdate(
+//           {},
+//           { $inc: { categorySeq: 1 } },
+//           { new: true, upsert: true }
+//         );
+//         const newCategoryId = counter.categorySeq;
+
+//         const newCategory = new Category({
+//           id: newCategoryId,
+//           name,
+//           image: result.secure_url,
+//           status: "inactive",
+//         });
+
+//         await newCategory.save();
+//         res.status(201).json({
+//           message: "Category added successfully!",
+//           category: newCategory,
+//         });
+//       }
+//     );
+
+//     const bufferStream = new PassThrough();
+//     bufferStream.end(req.file.buffer);
+//     bufferStream.pipe(uploadResult);
+//   } catch (error) {
+//     res.status(500).json({ message: "Server error", error: error.message });
+//   }
+// };
+
 const addCategory = async (req, res) => {
   try {
+    console.log("addCategory called");
+    console.log("BODY:", req.body);
+    console.log("FILE:", req.file ? req.file.originalname : "No file");
+
     let { name } = req.body;
+    if (!name) return res.status(400).json({ message: "Category name is required" });
+
     name = capitalizeFirstLetter(name.trim());
 
     const existingCategory = await Category.findOne({
       name: { $regex: new RegExp(`^${name}$`, "i") },
     });
-
     if (existingCategory) {
       return res.status(400).json({ message: "Category already exists." });
     }
@@ -25,47 +89,53 @@ const addCategory = async (req, res) => {
       return res.status(400).json({ message: "Please provide an image." });
     }
 
-    const uploadResult = await cloudinary.uploader.upload_stream(
-      {
-        folder: "categories",
-      },
-      async (error, result) => {
-        if (error) {
-          return res.status(500).json({
-            message: "Error uploading image to Cloudinary",
-            error: error.message,
-          });
-        }
-
-        const counter = await Counter.findOneAndUpdate(
-          {},
-          { $inc: { categorySeq: 1 } },
-          { new: true, upsert: true }
+    // Wrap cloudinary upload in a Promise
+    const uploadToCloudinary = (fileBuffer) => {
+      return new Promise((resolve, reject) => {
+        const stream = cloudinary.uploader.upload_stream(
+          { folder: "categories" },
+          (error, result) => {
+            if (error) reject(error);
+            else resolve(result);
+          }
         );
-        const newCategoryId = counter.categorySeq;
+        const bufferStream = new PassThrough();
+        bufferStream.end(fileBuffer);
+        bufferStream.pipe(stream);
+      });
+    };
 
-        const newCategory = new Category({
-          id: newCategoryId,
-          name,
-          image: result.secure_url,
-          status: "inactive",
-        });
+    const result = await uploadToCloudinary(req.file.buffer);
 
-        await newCategory.save();
-        res.status(201).json({
-          message: "Category added successfully!",
-          category: newCategory,
-        });
-      }
+    const counter = await Counter.findOneAndUpdate(
+      {},
+      { $inc: { categorySeq: 1 } },
+      { new: true, upsert: true }
     );
 
-    const bufferStream = new PassThrough();
-    bufferStream.end(req.file.buffer);
-    bufferStream.pipe(uploadResult);
+    const newCategory = new Category({
+      id: counter.categorySeq,
+      name,
+      image: result.secure_url,
+      status: "inactive",
+    });
+
+    await newCategory.save();
+
+    res.status(201).json({
+      message: "Category added successfully!",
+      category: newCategory,
+    });
+
   } catch (error) {
+    console.error("Error in addCategory:", error);
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };
+
+
+
+
 
 const getCategories = async (req, res) => {
   try {
